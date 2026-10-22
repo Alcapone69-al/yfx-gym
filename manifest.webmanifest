@@ -1,17 +1,20 @@
 {
+  "id": "./",
   "name": "YFX Gym",
   "short_name": "YFX Gym",
   "description": "O ginásio do teu grupo de amigos. Powered by YFX.",
   "lang": "pt",
-  "start_url": "./",
+  "dir": "ltr",
+  "start_url": "./#inicio",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#060d1f",
   "theme_color": "#060d1f",
+  "categories": ["health", "fitness", "sports"],
   "icons": [
-    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
     { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ]
 }

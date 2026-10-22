@@ -1,164 +1,165 @@
-// Camada de dados. Dois modos com a mesma interface:
-//  - DemoStore: dados de exemplo guardados só neste telemóvel (localStorage)
-//  - SupaStore: Supabase (contas, grupo privado, dados partilhados entre amigos)
+// Camada de dados do YFX Gym (Supabase).
+// Regra: tudo o que é crítico (check-in, treino/recordes, pesagem, ranking, convites) é uma função
+// do servidor (RPC). O browser só lê o que as regras RLS deixam e cria texto/fotos/reações/comentários.
 (function () {
-  const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : "id" + Math.random().toString(36).slice(2) + Date.now());
-  const iso = (d) => new Date(d).toISOString();
+  "use strict";
 
-  // ---------------- DEMO ----------------
-  const KEY = "yfxgym-demo-v1";
-  function weekStartOf(d) { const x = new Date(d); x.setHours(0, 0, 0, 0); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x; }
-  function at(base, dayOffset, h, m) { const x = new Date(base); x.setDate(x.getDate() + dayOffset); x.setHours(h, m || 0, 0, 0); return x; }
-
-  function seed() {
-    const now = new Date(), ws = weekStartOf(now), di = (now.getDay() + 6) % 7;
-    const G = { id: "g1", name: "Os Monstros do Ferro", invite_code: "YFX258", created_by: "u1" };
-    const P = [
-      { id: "u1", name: "Yassin", color: "#22d3ee", visits_target: 4, weight_goal_kg: -1, gym_lat: null, gym_lng: null, group_id: "g1" },
-      { id: "u2", name: "Chico", color: "#34d399", visits_target: 5, weight_goal_kg: 0, group_id: "g1" },
-      { id: "u3", name: "Nelson", color: "#f472b6", visits_target: 3, weight_goal_kg: -0.5, group_id: "g1" },
-      { id: "u4", name: "Dércio", color: "#fbbf24", visits_target: 4, weight_goal_kg: 0.25, group_id: "g1" },
-    ];
-    const D = { me: "u1", group: G, profiles: P, checkins: [], workouts: [], weighins: [], posts: [], reactions: [], comments: [] };
-    const ck = (u, t) => { D.checkins.push({ id: uuid(), user_id: u, group_id: "g1", verified: true, distance_m: 40, created_at: iso(t) }); D.posts.push({ id: uuid(), group_id: "g1", user_id: u, kind: "checkin", body: "", meta: { verified: true }, created_at: iso(t) }); };
-    const wk = (u, t, title, sets, prs = []) => {
-      const volume = sets.reduce((s, x) => s + (x.kg || 0) * (x.reps || 0), 0);
-      const w = { id: uuid(), user_id: u, group_id: "g1", title, sets, volume, prs, created_at: iso(t) };
-      D.workouts.push(w);
-      D.posts.push({ id: uuid(), group_id: "g1", user_id: u, kind: "workout", body: "", meta: { workout_id: w.id, title, n_ex: new Set(sets.map((s) => s.ex)).size, n_sets: sets.length, volume, prs }, created_at: iso(new Date(t.getTime() + 75 * 60000)) });
-    };
-    const S = (ex, arr) => arr.map(([reps, kg]) => ({ ex, reps, kg }));
-    // Semana passada (para histórico e "dias sem aparecer")
-    [[-7, 6], [-5, 6], [-3, 18], [-4, 17]].forEach(([d, h], i) => ck(["u2", "u3", "u4", "u4"][i], at(ws, d, h)));
-    wk("u4", at(ws, -4, 17), "Peito + Tríceps", [...S("Supino reto (barra)", [[8, 70], [8, 75], [6, 80]]), ...S("Tríceps na polia", [[12, 30], [12, 30]])]);
-    // Esta semana
-    [0, 1, 2, 3, 4, 5].filter((d) => d <= di).forEach((d) => ck("u2", at(ws, d, 6, 10)));
-    [0, 2].filter((d) => d <= di).forEach((d) => ck("u3", at(ws, d, 18, 30)));
-    [0, 1].filter((d) => d < di).forEach((d) => ck("u1", at(ws, d, 7, 5)));
-    wk("u2", at(ws, 0, 6, 10), "Pernas", [...S("Agachamento (barra)", [[8, 100], [6, 110], [5, 115]]), ...S("Leg press", [[12, 200], [12, 220]])]);
-    if (di >= 2) wk("u3", at(ws, 2, 18, 30), "Peito", [...S("Supino reto (barra)", [[8, 80], [5, 85], [3, 90]]), ...S("Crucifixo com halteres", [[12, 18], [12, 18]])], [{ ex: "Supino reto (barra)", kg: 90, reps: 3 }]);
-    wk("u1", at(ws, 0, 7, 5), "Costas + Bíceps", [...S("Puxada frontal", [[10, 55], [10, 60], [8, 65]]), ...S("Remada baixa (cabo)", [[12, 50], [10, 55]]), ...S("Rosca direta (barra)", [[10, 30], [8, 32.5]])]);
-    // Pesagens
-    D.weighins.push({ id: uuid(), user_id: "u1", group_id: "g1", kg: 97.0, created_at: iso(at(ws, -7, 7)) });
-    D.weighins.push({ id: uuid(), user_id: "u1", group_id: "g1", kg: 96.2, created_at: iso(at(ws, 0, 6, 50)) });
-    D.weighins.push({ id: uuid(), user_id: "u3", group_id: "g1", kg: 84.0, created_at: iso(at(ws, -7, 8)) });
-    D.weighins.push({ id: uuid(), user_id: "u3", group_id: "g1", kg: 83.6, created_at: iso(at(ws, 0, 8)) });
-    D.posts.push({ id: uuid(), group_id: "g1", user_id: "u1", kind: "weighin", body: "", meta: { delta: -0.8, goal: -1, result: "perto" }, created_at: iso(at(ws, 0, 6, 51)) });
-    const txt = { id: uuid(), group_id: "g1", user_id: "u2", kind: "text", body: "Quem vem treinar pernas amanhã às 6h? 🦵 Quem faltar paga o sumo.", meta: {}, created_at: iso(new Date(now.getTime() - 3 * 3600e3)) };
-    D.posts.push(txt);
-    D.posts.sort((a, b) => b.created_at.localeCompare(a.created_at));
-    const pr = D.posts.find((p) => p.kind === "workout" && p.meta.prs && p.meta.prs.length);
-    if (pr) { ["u1", "u2", "u4"].forEach((u) => D.reactions.push({ post_id: pr.id, user_id: u, emoji: "🔥", group_id: "g1" })); D.reactions.push({ post_id: pr.id, user_id: "u2", emoji: "💪", group_id: "g1" }); D.comments.push({ id: uuid(), post_id: pr.id, group_id: "g1", user_id: "u2", body: "Monstro! Para a semana são 95 🔥", created_at: iso(new Date(pr.created_at).getTime() + 20 * 60000) }); }
-    D.reactions.push({ post_id: txt.id, user_id: "u3", emoji: "💪", group_id: "g1" });
-    D.reactions.push({ post_id: txt.id, user_id: "u4", emoji: "😂", group_id: "g1" });
-    D.comments.push({ id: uuid(), post_id: txt.id, group_id: "g1", user_id: "u3", body: "Conta comigo.", created_at: iso(new Date(now.getTime() - 2.5 * 3600e3)) });
-    return D;
+  const ERR = {
+    AUTH: "A tua sessão terminou. Entra outra vez.",
+    NO_GROUP: "Ainda não estás num grupo.",
+    NO_GYM: "Ainda não guardaste o teu ginásio.",
+    LOW_ACCURACY: "A localização está pouco precisa. Vai para perto de uma janela ou para a rua e tenta outra vez.",
+    BAD_LOCATION: "Não consegui ler a tua localização. Tenta outra vez.",
+    GYM_RECENT: "Só podes mudar de ginásio uma vez por semana.",
+    BAD_WEIGHT: "Escreve um peso entre 30 e 300 kg.",
+    BAD_SETS: "Há séries com valores inválidos. Revê as repetições e a carga.",
+    BAD_NAME: "O nome tem de ter entre 2 e 40 letras.",
+    BAD_COLOR: "Cor inválida.",
+    BAD_GOAL: "Meta de peso inválida.",
+    BAD_PATH: "Não foi possível guardar a foto.",
+    INVALID_CODE: "Esse código de convite não existe. Confirma com quem te convidou.",
+    ALREADY_IN_GROUP: "Já estás num grupo. Sai primeiro no teu perfil.",
+    GROUP_FULL: "Este grupo já está cheio.",
+    RATE_LIMIT: "Calma! Demasiadas tentativas seguidas. Espera uns minutos.",
+    NOT_OWNER: "Só quem criou o grupo pode fazer isto.",
+    NOT_ALLOWED: "Não tens permissão para isto.",
+  };
+  function friendly(err) {
+    const m = String((err && (err.message || err.error_description || err.msg)) || err || "");
+    const code = m.split(":")[0].trim();
+    if (ERR[code]) return { code, message: ERR[code] };
+    if (code === "TOO_FAR") return { code, message: "Estás longe do ginásio.", distance: parseInt(m.split(":")[1], 10) };
+    if (/Invalid login/i.test(m)) return { code: "LOGIN", message: "Email ou palavra-passe errados." };
+    if (/already registered|already been registered/i.test(m)) return { code: "EXISTS", message: "Este email já tem conta. Entra em vez de criar." };
+    if (/Password should be|at least 6/i.test(m)) return { code: "WEAK", message: "A palavra-passe precisa de pelo menos 6 caracteres." };
+    if (/Email not confirmed/i.test(m)) return { code: "UNCONFIRMED", message: "Confirma primeiro o teu email (vê a caixa de entrada e o spam)." };
+    if (/rate limit|too many/i.test(m)) return { code: "RATE_LIMIT", message: ERR.RATE_LIMIT };
+    if (/JWT|token|not authenticated/i.test(m)) return { code: "AUTH", message: ERR.AUTH };
+    if (/row-level security|permission denied/i.test(m)) return { code: "NOT_ALLOWED", message: ERR.NOT_ALLOWED };
+    if (/Failed to fetch|NetworkError|Load failed|network|fetch/i.test(m) || (typeof navigator !== "undefined" && !navigator.onLine))
+      return { code: "OFFLINE", message: "Sem ligação à internet. Nada foi guardado; tenta outra vez quando tiveres rede." };
+    return { code: "UNKNOWN", message: "Algo correu mal. Tenta outra vez." };
   }
+  class AppError extends Error { constructor(f) { super(f.message); this.code = f.code; this.distance = f.distance; } }
+  const fail = (e) => { throw new AppError(friendly(e)); };
 
-  class DemoStore {
-    constructor() { this.mode = "demo"; this.listeners = []; }
-    _load() { try { const r = localStorage.getItem(KEY); if (r) return JSON.parse(r); } catch (e) {} const d = seed(); this._save(d); return d; }
-    _save(d) { this.d = d; try { localStorage.setItem(KEY, JSON.stringify(d)); } catch (e) { /* quota ou bloqueado: fica em memória */ } }
-    _commit() { this._save(this.d); this.listeners.forEach((f) => f()); }
-    async init() { this.d = this._load(); this.uid = this.d.me; return true; }
-    reset() { try { localStorage.removeItem(KEY); } catch (e) {} this.d = seed(); this._save(this.d); }
-    get profile() { return this.d.profiles.find((p) => p.id === this.uid); }
-    async signOut() { this.reset(); }
-    async getGroup() { return this.d.group; }
-    async members() { return this.d.profiles.filter((p) => p.group_id === this.d.group.id); }
-    async updateProfile(patch) { Object.assign(this.profile, patch); this._commit(); }
-    async checkins(since) { return this.d.checkins.filter((c) => !since || c.created_at >= since); }
-    async addCheckin(c) { const row = { id: uuid(), user_id: this.uid, group_id: "g1", created_at: iso(Date.now()), ...c }; this.d.checkins.push(row); this._commit(); return row; }
-    async workouts({ userId, since, limit } = {}) { let w = this.d.workouts.filter((x) => (!userId || x.user_id === userId) && (!since || x.created_at >= since)); w.sort((a, b) => b.created_at.localeCompare(a.created_at)); return limit ? w.slice(0, limit) : w; }
-    async addWorkout(w) { const row = { id: uuid(), user_id: this.uid, group_id: "g1", created_at: iso(Date.now()), ...w }; this.d.workouts.push(row); this._commit(); return row; }
-    async weighins() { return [...this.d.weighins].sort((a, b) => a.created_at.localeCompare(b.created_at)); }
-    async addWeighin(kg) { const row = { id: uuid(), user_id: this.uid, group_id: "g1", kg, created_at: iso(Date.now()) }; this.d.weighins.push(row); this._commit(); return row; }
-    async posts(limit = 60) { return [...this.d.posts].sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, limit); }
-    async addPost(p) { const row = { id: uuid(), group_id: "g1", user_id: this.uid, meta: {}, body: "", created_at: iso(Date.now()), ...p }; this.d.posts.unshift(row); this._commit(); return row; }
-    async uploadPhoto(blob) { return await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(blob); }); }
-    async reactions(ids) { return this.d.reactions.filter((r) => ids.includes(r.post_id)); }
-    async toggleReaction(postId, emoji, on) {
-      this.d.reactions = this.d.reactions.filter((r) => !(r.post_id === postId && r.user_id === this.uid && r.emoji === emoji));
-      if (on) this.d.reactions.push({ post_id: postId, user_id: this.uid, emoji, group_id: "g1" });
-      this._commit();
+  const PROFILE_COLS = "id,name,color,visits_target,weight_goal_kg,avatar_path,group_id";
+
+  class Store {
+    constructor(url, key) {
+      this.sb = window.supabase.createClient(url, key, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
+      this.urlCache = new Map(); // caminho da foto -> {url, exp}
+      this.onSignedOut = null;
+      this.sb.auth.onAuthStateChange((ev) => { if (ev === "SIGNED_OUT" && this.onSignedOut) this.onSignedOut(); });
     }
-    async comments(ids) { return this.d.comments.filter((c) => ids.includes(c.post_id)).sort((a, b) => a.created_at.localeCompare(b.created_at)); }
-    async addComment(postId, body) { this.d.comments.push({ id: uuid(), post_id: postId, group_id: "g1", user_id: this.uid, body, created_at: iso(Date.now()) }); this._commit(); }
-    subscribe() { /* demo: sem tempo real, a app recarrega após cada ação */ }
-  }
+    async q(p) { let r; try { r = await p; } catch (e) { fail(e); } if (r.error) fail(r.error); return r.data; }
 
-  // ---------------- SUPABASE ----------------
-  class SupaStore {
-    constructor(url, key) { this.mode = "live"; this.sb = window.supabase.createClient(url, key, { auth: { persistSession: true, autoRefreshToken: true } }); this.listeners = []; }
-    _e(r) { if (r.error) throw new Error(friendly(r.error.message)); return r.data; }
+    // ---------- sessão ----------
     async init() {
-      const { data: { session } } = await this.sb.auth.getSession();
-      this.uid = session?.user?.id || null;
+      const { data } = await this.sb.auth.getSession();
+      this.uid = data.session?.user?.id || null;
       if (this.uid) await this.loadProfile();
       return !!this.uid;
     }
-    async loadProfile() { this._profile = this._e(await this.sb.from("profiles").select("*").eq("id", this.uid).maybeSingle()); return this._profile; }
-    get profile() { return this._profile; }
+    async loadProfile() { this.profile = await this.q(this.sb.from("profiles").select(PROFILE_COLS).eq("id", this.uid).maybeSingle()); return this.profile; }
     async signUp(email, password, name) {
-      const r = await this.sb.auth.signUp({ email, password, options: { data: { name }, emailRedirectTo: location.origin + location.pathname } });
-      const d = this._e(r);
+      const d = await this.q(this.sb.auth.signUp({ email, password, options: { data: { name }, emailRedirectTo: location.origin + location.pathname } }));
       if (!d.session) return "confirm";
       this.uid = d.user.id; await this.loadProfile(); return "ok";
     }
-    async signIn(email, password) { const d = this._e(await this.sb.auth.signInWithPassword({ email, password })); this.uid = d.user.id; await this.loadProfile(); }
-    async signOut() { await this.sb.auth.signOut(); this.uid = null; this._profile = null; }
-    get gid() { return this._profile?.group_id; }
-    async createGroup(name) { this._e(await this.sb.rpc("create_group", { p_name: name })); await this.loadProfile(); }
-    async joinGroup(code) { this._e(await this.sb.rpc("join_group", { p_code: code })); await this.loadProfile(); }
-    async getGroup() { return this._e(await this.sb.from("groups").select("*").eq("id", this.gid).single()); }
-    async members() { return this._e(await this.sb.from("profiles").select("*").eq("group_id", this.gid)); }
-    async updateProfile(patch) { this._e(await this.sb.from("profiles").update(patch).eq("id", this.uid)); Object.assign(this._profile, patch); }
-    async checkins(since) { let q = this.sb.from("checkins").select("*").eq("group_id", this.gid); if (since) q = q.gte("created_at", since); return this._e(await q); }
-    async addCheckin(c) { return this._e(await this.sb.from("checkins").insert({ ...c, user_id: this.uid, group_id: this.gid }).select().single()); }
-    async workouts({ userId, since, limit } = {}) {
-      let q = this.sb.from("workouts").select("*").eq("group_id", this.gid).order("created_at", { ascending: false });
-      if (userId) q = q.eq("user_id", userId); if (since) q = q.gte("created_at", since); if (limit) q = q.limit(limit);
-      return this._e(await q);
+    async signIn(email, password) { const d = await this.q(this.sb.auth.signInWithPassword({ email, password })); this.uid = d.user.id; await this.loadProfile(); }
+    async signOut() { try { await this.sb.auth.signOut(); } catch (e) {} this.uid = null; this.profile = null; }
+    get gid() { return this.profile?.group_id; }
+
+    // ---------- grupo ----------
+    async createGroup(name) { await this.q(this.sb.rpc("create_group", { p_name: name })); await this.loadProfile(); }
+    async joinGroup(code) { await this.q(this.sb.rpc("join_group", { p_code: code })); await this.loadProfile(); }
+    async leaveGroup() { await this.q(this.sb.rpc("leave_group")); await this.loadProfile(); }
+    async rotateInvite() { return await this.q(this.sb.rpc("rotate_invite")); }
+    async removeMember(uid) { await this.q(this.sb.rpc("remove_member", { p_user: uid })); }
+    async getGroup() { return await this.q(this.sb.from("groups").select("id,name,invite_code,created_by,timezone").eq("id", this.gid).single()); }
+    async members() { return await this.q(this.sb.from("profiles").select(PROFILE_COLS).eq("group_id", this.gid).order("name")); }
+    async updateProfile(patch) {
+      const allowed = {}; ["name", "color", "visits_target", "weight_goal_kg"].forEach((k) => { if (k in patch) allowed[k] = patch[k]; });
+      await this.q(this.sb.from("profiles").update(allowed).eq("id", this.uid));
+      await this.loadProfile();
     }
-    async addWorkout(w) { return this._e(await this.sb.from("workouts").insert({ ...w, user_id: this.uid, group_id: this.gid }).select().single()); }
-    async weighins() { return this._e(await this.sb.from("weighins").select("*").eq("group_id", this.gid).order("created_at")); }
-    async addWeighin(kg) { return this._e(await this.sb.from("weighins").insert({ kg, user_id: this.uid, group_id: this.gid }).select().single()); }
-    async posts(limit = 60) { return this._e(await this.sb.from("posts").select("*").eq("group_id", this.gid).order("created_at", { ascending: false }).limit(limit)); }
-    async addPost(p) { return this._e(await this.sb.from("posts").insert({ meta: {}, body: "", ...p, user_id: this.uid, group_id: this.gid }).select().single()); }
-    async uploadPhoto(blob) {
-      const path = `${this.gid}/${this.uid}/${Date.now()}.jpg`;
-      this._e(await this.sb.storage.from("photos").upload(path, blob, { contentType: "image/jpeg" }));
-      return this.sb.storage.from("photos").getPublicUrl(path).data.publicUrl;
+    async setAvatar(path) { await this.q(this.sb.rpc("set_avatar", { p_path: path })); await this.loadProfile(); }
+
+    // ---------- semana / ranking ----------
+    async ranking(weeksAgo = 0) { return await this.q(this.sb.rpc("week_ranking", { p_weeks_ago: weeksAgo })); }
+    async myWeekTarget() { return await this.q(this.sb.rpc("my_week_target")); }
+    async myCheckinDays(fromDate) { return (await this.q(this.sb.from("checkins").select("local_date,created_at").eq("user_id", this.uid).gte("local_date", fromDate))); }
+
+    // ---------- check-in ----------
+    async myGym() { return await this.q(this.sb.rpc("my_gym")); }
+    async checkIn(pos) { return await this.q(this.sb.rpc("check_in", { p_lat: pos.latitude, p_lng: pos.longitude, p_accuracy: pos.accuracy })); }
+    async setGymAndCheckIn(pos) { return await this.q(this.sb.rpc("set_gym_and_check_in", { p_lat: pos.latitude, p_lng: pos.longitude, p_accuracy: pos.accuracy })); }
+
+    // ---------- peso ----------
+    async myWeight() { return await this.q(this.sb.rpc("my_weight")); }
+    async logWeight(kg) { return await this.q(this.sb.rpc("log_weight", { p_kg: kg })); }
+
+    // ---------- treinos ----------
+    async finishWorkout(clientId, title, sets) { return await this.q(this.sb.rpc("finish_workout", { p_client_id: clientId, p_title: title, p_sets: sets })); }
+    async myWorkouts(limit = 10, before) {
+      let q = this.sb.from("workouts").select("id,title,sets,volume,prs,created_at").eq("user_id", this.uid).order("created_at", { ascending: false }).limit(limit);
+      if (before) q = q.lt("created_at", before);
+      return await this.q(q);
     }
-    async reactions(ids) { if (!ids.length) return []; return this._e(await this.sb.from("reactions").select("*").in("post_id", ids)); }
+    async myBests(ex) { return await this.q(this.sb.rpc("my_bests", { p_ex: ex })); }
+    async groupBests(ex) { return await this.q(this.sb.rpc("group_bests", { p_ex: ex })); }
+
+    // ---------- feed ----------
+    async posts(limit = 20, before) {
+      let q = this.sb.from("posts").select("id,user_id,kind,body,meta,photo_path,created_at").eq("group_id", this.gid).order("created_at", { ascending: false }).limit(limit);
+      if (before) q = q.lt("created_at", before);
+      return await this.q(q);
+    }
+    async addPost(body, photoPath) {
+      return await this.q(this.sb.from("posts").insert({ group_id: this.gid, user_id: this.uid, kind: photoPath ? "photo" : "text", body: body || "", photo_path: photoPath || null }).select("id").single());
+    }
+    async deletePost(id) { await this.q(this.sb.from("posts").delete().eq("id", id).eq("user_id", this.uid)); }
+    async reactions(ids) { if (!ids.length) return []; return await this.q(this.sb.from("reactions").select("post_id,user_id,emoji").in("post_id", ids)); }
     async toggleReaction(postId, emoji, on) {
-      if (on) this._e(await this.sb.from("reactions").insert({ post_id: postId, emoji, user_id: this.uid, group_id: this.gid }));
-      else this._e(await this.sb.from("reactions").delete().match({ post_id: postId, emoji, user_id: this.uid }));
+      if (on) {
+        const r = await this.sb.from("reactions").insert({ post_id: postId, emoji, user_id: this.uid, group_id: this.gid });
+        if (r.error && r.error.code !== "23505") fail(r.error); // 23505 = já existia: não é erro
+      } else await this.q(this.sb.from("reactions").delete().match({ post_id: postId, emoji, user_id: this.uid }));
     }
-    async comments(ids) { if (!ids.length) return []; return this._e(await this.sb.from("comments").select("*").in("post_id", ids).order("created_at")); }
-    async addComment(postId, body) { this._e(await this.sb.from("comments").insert({ post_id: postId, body, user_id: this.uid, group_id: this.gid })); }
+    async comments(ids) { if (!ids.length) return []; return await this.q(this.sb.from("comments").select("id,post_id,user_id,body,created_at").in("post_id", ids).order("created_at")); }
+    async addComment(postId, body) { await this.q(this.sb.from("comments").insert({ post_id: postId, body, user_id: this.uid, group_id: this.gid })); }
+    async deleteComment(id) { await this.q(this.sb.from("comments").delete().eq("id", id).eq("user_id", this.uid)); }
+
+    // ---------- fotos (bucket privado + links temporários) ----------
+    async uploadPhoto(blob, kind = "post") {
+      const rnd = Math.random().toString(36).slice(2, 8);
+      const path = `${this.gid}/${this.uid}/${kind}-${Date.now()}-${rnd}.jpg`;
+      await this.q(this.sb.storage.from("photos").upload(path, blob, { contentType: "image/jpeg", upsert: false }));
+      return path;
+    }
+    async signedUrls(paths) {
+      const now = Date.now(), need = [...new Set(paths.filter(Boolean))].filter((p) => !(this.urlCache.get(p)?.exp > now + 60e3));
+      if (need.length) {
+        try {
+          const data = await this.q(this.sb.storage.from("photos").createSignedUrls(need, 3600));
+          (data || []).forEach((d) => { if (d.signedUrl) this.urlCache.set(d.path, { url: d.signedUrl, exp: now + 3500e3 }); });
+        } catch (e) { /* sem rede: mostra sem foto */ }
+      }
+      const out = {}; paths.forEach((p) => { if (p && this.urlCache.has(p)) out[p] = this.urlCache.get(p).url; }); return out;
+    }
+
+    // ---------- tempo real ----------
     subscribe(fn) {
-      if (this.ch) this.sb.removeChannel(this.ch);
-      let t; const ping = () => { clearTimeout(t); t = setTimeout(fn, 400); };
+      this.unsubscribe();
+      let t; const ping = (table) => { clearTimeout(t); t = setTimeout(() => fn(table), 500); };
       this.ch = this.sb.channel("g-" + this.gid);
-      ["posts", "reactions", "comments", "checkins"].forEach((table) => this.ch.on("postgres_changes", { event: "*", schema: "public", table, filter: `group_id=eq.${this.gid}` }, ping));
+      ["posts", "reactions", "comments", "checkins"].forEach((table) =>
+        this.ch.on("postgres_changes", { event: "*", schema: "public", table, filter: `group_id=eq.${this.gid}` }, () => ping(table)));
       this.ch.subscribe();
     }
+    unsubscribe() { if (this.ch) { this.sb.removeChannel(this.ch); this.ch = null; } }
   }
 
-  function friendly(m) {
-    if (/Invalid login/i.test(m)) return "Email ou palavra-passe errados.";
-    if (/already registered/i.test(m)) return "Este email já tem conta. Entra em vez de criar.";
-    if (/Password should be/i.test(m)) return "A palavra-passe precisa de pelo menos 6 caracteres.";
-    if (/Email not confirmed/i.test(m)) return "Confirma primeiro o teu email (vê a caixa de entrada).";
-    if (/Código inválido/i.test(m)) return "Esse código de convite não existe. Confirma com quem te convidou.";
-    if (/Failed to fetch|NetworkError/i.test(m)) return "Sem ligação à internet. Tenta outra vez.";
-    return m;
-  }
-
-  window.makeStore = function () {
-    const c = window.YFX_CONFIG || {};
-    if (c.supabaseUrl && c.supabaseAnonKey && window.supabase) return new SupaStore(c.supabaseUrl, c.supabaseAnonKey);
-    return new DemoStore();
-  };
+  window.YFXStore = { Store, AppError, friendly };
 })();
